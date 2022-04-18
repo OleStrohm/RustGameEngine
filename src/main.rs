@@ -4,6 +4,8 @@ mod renderer;
 mod texture;
 mod vertex;
 mod light;
+mod quad;
+mod buffers;
 
 use renderer::State;
 use winit::{

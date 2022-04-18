@@ -43,7 +43,6 @@ impl InputHandler {
     }
 
     pub fn update_key(&mut self, key: Key, state: ElementState) {
-        println!("{key:?} is {state:?}");
         match state {
             ElementState::Pressed => self.pressed.insert(key),
             ElementState::Released => self.pressed.remove(&key),
