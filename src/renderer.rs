@@ -10,30 +10,29 @@ use cgmath::InnerSpace;
 use cgmath::Rotation3;
 use cgmath::Zero;
 use wgpu::util::DeviceExt;
-use winit::dpi::PhysicalPosition;
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 pub const VERTICES: &[Vertex] = &[
     Vertex {
         position: [-0.5, 0.5, 0.0],
-        tex_coords: [0.4131759, 0.00759614],
+        tex_coords: [0.0, 0.0],
+        normal: [0.0, 0.0, 1.0],
     }, // A
     Vertex {
         position: [-0.5, -0.5, 0.0],
-        tex_coords: [0.0048659444, 0.43041354],
+        tex_coords: [0.0, 1.0],
+        normal: [0.0, 0.0, 1.0],
     }, // B
     Vertex {
-        position: [-0.21918549, -0.34939706, 0.0],
-        tex_coords: [0.28081453, 0.949397],
-    }, // C
-    Vertex {
         position: [0.5, -0.5, 0.0],
-        tex_coords: [0.85967, 0.84732914],
+        tex_coords: [1.0, 1.0],
+        normal: [0.0, 0.0, 1.0],
     }, // D
     Vertex {
         position: [0.5, 0.5, 0.0],
-        tex_coords: [0.9414737, 0.2652641],
+        tex_coords: [1.0, 0.0],
+        normal: [0.0, 0.0, 1.0],
     }, // E
 ];
 
@@ -92,14 +91,13 @@ impl InstanceRaw {
 }
 
 pub const NUM_INSTANCES_PER_ROW: u32 = 10;
-pub const NUM_INSTANCES: u32 = NUM_INSTANCES_PER_ROW * NUM_INSTANCES_PER_ROW;
 pub const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
     NUM_INSTANCES_PER_ROW as f32 * 0.5,
     0.0,
     NUM_INSTANCES_PER_ROW as f32 * 0.5,
 );
 
-pub const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4, 0];
+pub const INDICES: &[u16] = &[0, 1, 3, 1, 2, 3];
 
 pub struct State {
     input_handler: InputHandler,
@@ -108,7 +106,6 @@ pub struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
-    mouse_pos: PhysicalPosition<f64>,
     render_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
     vertex_buffer: wgpu::Buffer,
@@ -222,7 +219,7 @@ impl State {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -337,7 +334,7 @@ impl State {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let num_indices = INDICES.len() as u32 - 1;
+        let num_indices = INDICES.len() as u32;
 
         let camera_controller = CameraController::new(0.2);
 
@@ -380,7 +377,6 @@ impl State {
             queue,
             config,
             size,
-            mouse_pos: Default::default(),
             render_pipeline,
             depth_texture,
             vertex_buffer,
@@ -498,8 +494,6 @@ impl State {
 
         render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
 
-
-
         drop(render_pass);
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -536,7 +530,7 @@ impl State {
                 }],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),

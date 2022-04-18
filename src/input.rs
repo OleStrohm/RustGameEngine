@@ -60,7 +60,7 @@ impl InputHandler {
     pub fn update_wheel(&mut self, delta: MouseScrollDelta) {
         self.mouse_scroll = match delta {
             MouseScrollDelta::PixelDelta(d) => (d.x, d.y),
-            _ => unimplemented!("Line scrolling is silly"),
+            MouseScrollDelta::LineDelta(lx, ly) => (lx as f64, ly as f64),
         };
     }
 
