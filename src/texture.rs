@@ -2,28 +2,28 @@ use anyhow::*;
 use image::GenericImageView;
 use std::num::NonZeroU32;
 
+use crate::renderer::Context;
+
 pub struct Texture {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
-    pub bind_group_layout: wgpu::BindGroupLayout,
-    pub bind_group: wgpu::BindGroup,
+    bind_group_layout: wgpu::BindGroupLayout,
+    bind_group: wgpu::BindGroup,
 }
 
 impl Texture {
     pub fn from_bytes(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        context: &Context,
         bytes: &[u8],
         label: &str,
     ) -> Result<Self> {
         let img = image::load_from_memory(bytes)?;
-        Self::from_image(device, queue, &img, Some(label))
+        Self::from_image(context, &img, Some(label))
     }
 
     pub fn from_image(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        context: &Context,
         img: &image::DynamicImage,
         label: Option<&str>,
     ) -> Result<Self> {
@@ -36,7 +36,7 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
+        let texture = context.device().create_texture(&wgpu::TextureDescriptor {
             size,
             mip_level_count: 1,
             sample_count: 1,
@@ -46,7 +46,7 @@ impl Texture {
             label,
         });
 
-        queue.write_texture(
+        context.queue().write_texture(
             wgpu::ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
@@ -63,7 +63,7 @@ impl Texture {
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = context.device().create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -74,7 +74,7 @@ impl Texture {
         });
 
         let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            context.device().create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -96,7 +96,7 @@ impl Texture {
                 label: Some("texture_bind_group_layout"),
             });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = context.device().create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -118,6 +118,14 @@ impl Texture {
             bind_group_layout,
             bind_group,
         })
+    }
+
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
+    }
+
+    pub fn layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
     }
 }
 

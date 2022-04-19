@@ -11,8 +11,16 @@ struct Light {
     position: vec3<f32>;
     color: vec3<f32>;
 };
+struct Lights {
+    data: array<Light>;
+};
+[[group(3), binding(0)]]
+var<storage, read> lights: Lights;
+struct LightCount {
+    data: u32;
+};
 [[group(2), binding(0)]]
-var<uniform> light: Light;
+var<uniform> num_lights: LightCount;
 
 struct CameraUniform {
     view_pos: vec4<f32>;
@@ -58,5 +66,19 @@ var s_diffuse: sampler;
 
 [[stage(fragment)]]
 fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-    return textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    let color = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    var diffuse_color = vec3<f32>(0.1, 0.1, 0.1);
+
+    //let num_lights: i32 = bitcast<i32>(num_lights.data);
+
+    for (var i: u32 = 0u; i < num_lights.data; i = i + 1u) {
+        let light = lights.data[i];
+        let distance = length(in.world_position - light.position);
+        let strength = 1.0 / distance / distance;
+
+        diffuse_color = diffuse_color + light.color * strength;
+    }
+
+    return vec4<f32>(diffuse_color * color.xyz, color.a);
+
 }

@@ -7,7 +7,7 @@ mod light;
 mod quad;
 mod buffers;
 
-use renderer::State;
+use renderer::Renderer;
 use winit::{
     dpi::{PhysicalSize, Size, Position, PhysicalPosition},
     event::*,
@@ -25,11 +25,12 @@ fn main() {
         .build(&event_loop)
         .unwrap();
 
-    let mut state = pollster::block_on(State::new(&window));
+    let mut state = pollster::block_on(Renderer::new(&window));
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::RedrawRequested(_) => {
             state.update();
+            state.input().frame();
             match state.render() {
                 Ok(_) => {}
                 Err(wgpu::SurfaceError::Lost) => state.resize(state.get_size()),
@@ -60,15 +61,15 @@ fn main() {
                         ..
                     },
                 ..
-            } => state.input_handler().update_key(key, key_state),
-            &WindowEvent::MouseWheel { delta, .. } => state.input_handler().update_wheel(delta),
+            } => state.input().update_key(key, key_state),
+            &WindowEvent::MouseWheel { delta, .. } => state.input().update_wheel(delta),
             &WindowEvent::MouseInput {
                 state: button_state,
                 button,
                 ..
-            } => state.input_handler().update_button(button, button_state),
+            } => state.input().update_button(button, button_state),
             &WindowEvent::CursorMoved { position, .. } => {
-                state.input_handler().update_cursor(position)
+                state.input().update_cursor(position)
             }
             WindowEvent::Resized(size) => state.resize(*size),
             WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {

@@ -1,27 +1,30 @@
-use std::ops::{Deref, DerefMut};
+use std::marker::PhantomData;
 
 use bytemuck::{NoUninit, Pod};
-use wgpu::{BufferUsages, BindGroupLayout, BindGroup};
 use wgpu::{util::DeviceExt, Device};
+use wgpu::{BindGroup, BindGroupLayout, BufferUsages};
+
+use crate::renderer::{self, Context};
 const VERTEX: BufferUsages = wgpu::BufferUsages::VERTEX;
 const INDEX: BufferUsages = wgpu::BufferUsages::INDEX;
 const UNIFORM: BufferUsages = wgpu::BufferUsages::UNIFORM;
+const STORAGE: BufferUsages = wgpu::BufferUsages::STORAGE;
 const COPY_DST: BufferUsages = wgpu::BufferUsages::COPY_DST;
 
 pub struct Uniform<C> {
     uniform: Buffer,
-    content: C,
+    content_marker: PhantomData<C>,
 }
 
 impl<C: Pod> Uniform<C> {
     #[inline]
-    pub fn new(device: &Device, content: C) -> Self {
-        let raw = uniform(device, &[content]);
-        let (bind_group, bind_group_layout) = create_uniform_bind_group(&device, 0, &raw);
+    pub fn new(context: &Context, content: impl Into<C>) -> Self {
+        let raw = uniform(context.device(), &[content.into()]);
+        let (bind_group, bind_group_layout) = create_uniform_bind_group(&context.device(), 0, &raw);
 
         Self {
             uniform: Buffer::new(raw, bind_group, bind_group_layout),
-            content,
+            content_marker: PhantomData,
         }
     }
 
@@ -42,22 +45,61 @@ impl<C: Pod> Uniform<C> {
     }
 
     #[inline]
-    pub fn update(&mut self, queue: &wgpu::Queue) {
-        queue.write_buffer(&self.uniform.raw, 0, bytemuck::cast_slice(&[self.content]));
+    pub fn update(&self, context: &renderer::Context, content: impl Into<C>) {
+        context.queue().write_buffer(
+            &self.uniform.raw,
+            0,
+            bytemuck::cast_slice(&[content.into()]),
+        );
     }
 }
 
-impl<C> Deref for Uniform<C> {
-    type Target = C;
-
-    fn deref(&self) -> &Self::Target {
-        &self.content
-    }
+pub struct Storage<C> {
+    storage: Buffer,
+    content_marker: PhantomData<C>,
 }
 
-impl<C> DerefMut for Uniform<C> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.content
+impl<C: Pod> Storage<C> {
+    #[inline]
+    pub fn new<T>(context: &Context, content: &[T]) -> Self
+    where
+        for<'a> &'a T: Into<C>,
+    {
+        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+        let raw = storage(context.device(), content.as_ref());
+        let (bind_group, bind_group_layout) = create_storage_bind_group(&context.device(), 0, &raw);
+
+        Self {
+            storage: Buffer::new(raw, bind_group, bind_group_layout),
+            content_marker: PhantomData,
+        }
+    }
+
+    #[allow(dead_code)]
+    #[inline]
+    pub fn raw(&self) -> &Buffer {
+        &self.storage
+    }
+
+    #[inline]
+    pub fn layout(&self) -> &BindGroupLayout {
+        &self.storage.layout()
+    }
+
+    #[inline]
+    pub fn bind_group(&self) -> &BindGroup {
+        &self.storage.bind_group()
+    }
+
+    #[inline]
+    pub fn update<T>(&self, context: &renderer::Context, content: &[T])
+    where
+        for<'a> &'a T: Into<C>,
+    {
+        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+        context
+            .queue()
+            .write_buffer(&self.storage.raw, 0, bytemuck::cast_slice(&content));
     }
 }
 
@@ -103,6 +145,10 @@ pub fn uniform(device: &Device, contents: &[impl NoUninit]) -> wgpu::Buffer {
     buffer(device, "Uniform Buffer", contents, UNIFORM | COPY_DST)
 }
 
+pub fn storage(device: &Device, contents: &[impl NoUninit]) -> wgpu::Buffer {
+    buffer(device, "Uniform Buffer", contents, STORAGE | COPY_DST)
+}
+
 pub fn vertex(device: &wgpu::Device, contents: &[impl NoUninit]) -> wgpu::Buffer {
     buffer(device, "Vertex Buffer", contents, VERTEX)
 }
@@ -139,6 +185,37 @@ pub fn create_uniform_bind_group(
             visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+        label: None,
+    });
+
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        layout: &layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding,
+            resource: buffer.as_entire_binding(),
+        }],
+        label: None,
+    });
+
+    (group, layout)
+}
+
+pub fn create_storage_bind_group(
+    device: &Device,
+    binding: u32,
+    buffer: &wgpu::Buffer,
+) -> (wgpu::BindGroup, wgpu::BindGroupLayout) {
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
                 has_dynamic_offset: false,
                 min_binding_size: None,
             },
