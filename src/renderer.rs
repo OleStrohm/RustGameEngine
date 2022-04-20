@@ -170,11 +170,11 @@ impl Renderer {
             (cgmath::Quaternion::from_axis_angle((0.0, 0.0, 1.0).into(), cgmath::Deg(1.0))
                 * old_position)
                 .into();
-        let old_position: cgmath::Vector3<_> = self.lights[1].position.into();
-        self.lights[1].position =
-            (cgmath::Quaternion::from_axis_angle((0.0, 0.0, -1.0).into(), cgmath::Deg(1.0))
-                * old_position)
-                .into();
+        //let old_position: cgmath::Vector3<_> = self.lights[1].position.into();
+        //self.lights[1].position =
+        //    (cgmath::Quaternion::from_axis_angle((0.0, 0.0, -1.0).into(), cgmath::Deg(1.0))
+        //        * old_position)
+        //        .into();
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -222,13 +222,6 @@ impl Renderer {
         self.num_lights_uniform
             .update(&self.context, self.lights.len() as u32);
 
-        // Debug draw lights
-        self.lights_uniform.update(&self.context, &self.lights[1]);
-        render_pass.set_pipeline(&self.light_render_pipeline);
-        render_pass.set_bind_group(0, &self.camera_uniform.bind_group(), &[]);
-        render_pass.set_bind_group(1, &self.lights_storage.bind_group(), &[]);
-        render_pass.draw_quad_indexed(&self.quad, 0..self.lights.len() as _);
-
         // Draw everything
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.diffuse_texture.bind_group(), &[]);
@@ -237,9 +230,14 @@ impl Renderer {
         render_pass.set_bind_group(3, &self.num_lights_uniform.bind_group(), &[]);
 
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        for i in 0..instances.len() as _ {
-            render_pass.draw_quad_indexed(&self.quad, i..i + 1);
-        }
+        render_pass.draw_quad_indexed(&self.quad, 0..self.instances.len() as _);
+
+        // Debug draw lights
+        self.lights_uniform.update(&self.context, &self.lights[1]);
+        render_pass.set_pipeline(&self.light_render_pipeline);
+        render_pass.set_bind_group(0, &self.camera_uniform.bind_group(), &[]);
+        render_pass.set_bind_group(1, &self.lights_storage.bind_group(), &[]);
+        render_pass.draw_quad_indexed(&self.quad, 0..self.lights.len() as _);
 
         drop(render_pass);
 

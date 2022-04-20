@@ -19,7 +19,7 @@ var<storage, read> lights: Lights;
 struct LightCount {
     data: u32;
 };
-[[group(3), binding(0)]]
+[[group(2), binding(1)]]
 var<uniform> num_lights: LightCount;
 
 struct CameraUniform {
