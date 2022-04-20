@@ -2,6 +2,8 @@ use std::iter::repeat;
 
 use cgmath::Vector3;
 
+use crate::buffers::ToData;
+
 #[derive(Debug)]
 pub struct Light {
     pub position: Vector3<f32>,
@@ -17,12 +19,14 @@ impl Light {
     }
 }
 
-impl From<&Light> for LightUniform {
-    fn from(light: &Light) -> Self {
-        Self {
-            position: light.position.into(),
+impl ToData for Light {
+    type Data = LightUniform;
+
+    fn to_data(&self) -> Self::Data {
+        LightUniform {
+            position: self.position.into(),
             _padding_pos: 0,
-            color: light.color.into(),
+            color: self.color.into(),
             _padding_col: 0,
         }
     }

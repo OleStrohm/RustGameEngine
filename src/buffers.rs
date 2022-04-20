@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::marker::PhantomData;
 use std::ops::RangeBounds;
 
@@ -12,14 +13,28 @@ const UNIFORM: BufferUsages = wgpu::BufferUsages::UNIFORM;
 const STORAGE: BufferUsages = wgpu::BufferUsages::STORAGE;
 const COPY_DST: BufferUsages = wgpu::BufferUsages::COPY_DST;
 
+pub trait ToData {
+    type Data: Pod;
+
+    fn to_data(&self) -> Self::Data;
+}
+
+impl ToData for u32 {
+    type Data = u32;
+
+    fn to_data(&self) -> Self::Data {
+        *self
+    }
+}
+
 pub struct Uniform<C> {
     uniform: Buffer<C>,
 }
 
-impl<C: Pod> Uniform<C> {
+impl<C: ToData> Uniform<C> {
     #[inline]
-    pub fn new(context: &Context, content: impl Into<C>) -> Self {
-        let raw = uniform(context.device(), &[content.into()]);
+    pub fn new(context: &Context, content: impl Borrow<C>) -> Self {
+        let raw = uniform(context.device(), &[content.borrow().to_data()]);
         let (bind_group, bind_group_layout) = create_uniform_bind_group(&context.device(), 0, &raw);
 
         Self {
@@ -44,11 +59,11 @@ impl<C: Pod> Uniform<C> {
     }
 
     #[inline]
-    pub fn update(&self, context: &renderer::Context, content: impl Into<C>) {
+    pub fn update(&self, context: &renderer::Context, content: impl Borrow<C>) {
         context.queue().write_buffer(
             &self.uniform.raw,
             0,
-            bytemuck::cast_slice(&[content.into()]),
+            bytemuck::cast_slice(&[content.borrow().to_data()]),
         );
     }
 }
@@ -58,16 +73,18 @@ pub struct Storage<C> {
     length_buffer: wgpu::Buffer,
 }
 
-impl<C: Pod> Storage<C> {
+impl<C: ToData> Storage<C> {
     #[inline]
-    pub fn new<T>(context: &Context, content: &[T]) -> Self
-    where
-        for<'a> &'a T: Into<C>,
-    {
-        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+    pub fn new(context: &Context, content: impl AsRef<[C]>) -> Self {
+        let content = content
+            .as_ref()
+            .iter()
+            .map(ToData::to_data)
+            .collect::<Vec<C::Data>>();
         let storage_buffer = storage(context.device(), content.as_ref());
         let length_buffer = uniform(context.device(), &[0u32]);
-        let (bind_group, bind_group_layout) = create_storage_bind_group(&context.device(), &storage_buffer, &length_buffer);
+        let (bind_group, bind_group_layout) =
+            create_storage_bind_group(&context.device(), &storage_buffer, &length_buffer);
 
         Self {
             storage: Buffer::new(storage_buffer, bind_group, bind_group_layout),
@@ -92,17 +109,20 @@ impl<C: Pod> Storage<C> {
     }
 
     #[inline]
-    pub fn update<T>(&self, context: &renderer::Context, content: &[T])
-    where
-        for<'a> &'a T: Into<C>,
-    {
-        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+    pub fn update(&self, context: &Context, content: impl AsRef<[C]>) {
+        let content = content
+            .as_ref()
+            .iter()
+            .map(ToData::to_data)
+            .collect::<Vec<C::Data>>();
         context
             .queue()
             .write_buffer(&self.storage.raw, 0, bytemuck::cast_slice(&content));
-        context
-            .queue()
-            .write_buffer(&self.length_buffer, 0, bytemuck::cast_slice(&[content.len() as u32]));
+        context.queue().write_buffer(
+            &self.length_buffer,
+            0,
+            bytemuck::cast_slice(&[content.len() as u32]),
+        );
     }
 }
 
@@ -111,13 +131,14 @@ pub struct InstanceBuffer<C> {
     _content_marker: PhantomData<C>,
 }
 
-impl<C: Pod> InstanceBuffer<C> {
+impl<C: ToData> InstanceBuffer<C> {
     #[inline]
-    pub fn new<T>(context: &Context, content: &[T]) -> Self
-    where
-        for<'a> &'a T: Into<C>,
-    {
-        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+    pub fn new(context: &Context, content: impl AsRef<[C]>) -> Self {
+        let content = content
+            .as_ref()
+            .iter()
+            .map(ToData::to_data)
+            .collect::<Vec<C::Data>>();
         let raw = instance(context.device(), content.as_ref());
 
         Self {
@@ -127,11 +148,12 @@ impl<C: Pod> InstanceBuffer<C> {
     }
 
     #[inline]
-    pub fn update<T>(&self, context: &renderer::Context, content: &[T])
-    where
-        for<'a> &'a T: Into<C>,
-    {
-        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+    pub fn update(&self, context: &renderer::Context, content: impl AsRef<[C]>) {
+        let content = content
+            .as_ref()
+            .iter()
+            .map(ToData::to_data)
+            .collect::<Vec<C::Data>>();
         context
             .queue()
             .write_buffer(&self.raw, 0, bytemuck::cast_slice(&content));
@@ -157,7 +179,7 @@ pub struct Buffer<C> {
     _content_marker: PhantomData<C>,
 }
 
-impl<C: Pod> Buffer<C> {
+impl<C: ToData> Buffer<C> {
     #[inline]
     pub fn new(
         raw: wgpu::Buffer,
@@ -190,11 +212,12 @@ impl<C: Pod> Buffer<C> {
 
     #[allow(dead_code)]
     #[inline]
-    pub fn update<T>(&self, context: &renderer::Context, content: &[T])
-    where
-        for<'a> &'a T: Into<C>,
-    {
-        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+    pub fn update(&self, context: &renderer::Context, content: impl AsRef<[C]>) {
+        let content = content
+            .as_ref()
+            .iter()
+            .map(|l| l.to_data())
+            .collect::<Vec<C::Data>>();
         context
             .queue()
             .write_buffer(&self.raw, 0, bytemuck::cast_slice(&content));

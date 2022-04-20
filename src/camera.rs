@@ -1,5 +1,6 @@
 use cgmath::Rad;
 
+use crate::buffers::ToData;
 use crate::input::InputHandler;
 use crate::input::Key;
 
@@ -34,7 +35,14 @@ impl Camera {
     pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         let size = 5.0;
-        let proj = cgmath::ortho(-size * self.aspect, size * self.aspect, -size, size, 10.0, -10.0);
+        let proj = cgmath::ortho(
+            -size * self.aspect,
+            size * self.aspect,
+            -size,
+            size,
+            10.0,
+            -10.0,
+        );
 
         return OPENGL_TO_WGPU_MATRIX * proj * view;
     }
@@ -74,11 +82,13 @@ impl CameraController {
     }
 }
 
-impl From<&Camera> for CameraUniform {
-    fn from(camera: &Camera) -> Self {
-        Self {
-            view_position: camera.eye.to_homogeneous().into(),
-            view_proj: (OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix()).into(),
+impl ToData for Camera {
+    type Data = CameraUniform;
+
+    fn to_data(&self) -> Self::Data {
+        CameraUniform {
+            view_position: self.eye.to_homogeneous().into(),
+            view_proj: (OPENGL_TO_WGPU_MATRIX * self.build_view_projection_matrix()).into(),
         }
     }
 }

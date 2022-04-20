@@ -1,18 +1,9 @@
-use crate::buffers::InstanceBuffer;
-use crate::buffers::Storage;
-use crate::buffers::Uniform;
-use crate::camera::Camera;
-use crate::camera::CameraController;
-use crate::camera::CameraUniform;
-use crate::input::InputHandler;
-use crate::input::Key;
+use crate::buffers::{InstanceBuffer, Storage, Uniform};
+use crate::camera::{Camera, CameraController};
+use crate::input::{InputHandler, Key};
 use crate::light::Light;
-use crate::light::LightUniform;
-use crate::quad::DrawQuad;
-use crate::quad::Quad;
-use crate::texture;
-use crate::texture::DepthTexture;
-use crate::texture::Texture;
+use crate::quad::{DrawQuad, Instance, InstanceRaw, Quad};
+use crate::texture::{self, DepthTexture, Texture};
 use crate::vertex::Vertex;
 use cgmath::Rotation3;
 use std::borrow::Cow;
@@ -28,13 +19,12 @@ pub struct Renderer {
     diffuse_texture: Texture,
     camera: Camera,
     camera_controller: CameraController,
-    camera_uniform: Uniform<CameraUniform>,
+    camera_uniform: Uniform<Camera>,
     instances: Vec<Instance>,
-    instance_buffer: InstanceBuffer<InstanceRaw>,
+    instance_buffer: InstanceBuffer<Instance>,
     instances_to_draw: usize,
-    lights_uniform: Uniform<LightUniform>,
-    num_lights_uniform: Uniform<u32>,
-    lights_storage: Storage<LightUniform>,
+    lights_uniform: Uniform<Light>,
+    lights_storage: Storage<Light>,
     lights: Vec<Light>,
     light_render_pipeline: wgpu::RenderPipeline,
 }
@@ -52,13 +42,13 @@ impl Renderer {
         let camera = Camera::basic(config.width, config.height, cgmath::Deg(45.0));
         let camera_uniform = Uniform::new(&context, &camera);
 
-        let light1 = Light::new([2.0, 2.0, -0.2], [1.0, 1.0, 1.0]);
-        let light2 = Light::new([-2.0, -2.0, -0.2], [1.0, 1.0, 1.0]);
+        let light1 = Light::new([2.0, 2.0, -0.1], [1.0, 1.0, 1.0]);
+        let light2 = Light::new([-2.0, -2.0, -0.1], [1.0, 1.0, 1.0]);
         let lights_uniform = Uniform::new(&context, &light1);
         let lights = vec![light1, light2];
 
         let lights_storage = Storage::new(&context, &lights);
-        let num_lights_uniform = Uniform::new(&context, 0u32);
+        let _num_lights_uniform = Uniform::new(&context, 0u32);
 
         let render_pipeline = context.create_render_pipeline(
             include_str!("shader.wgsl").into(),
@@ -66,7 +56,6 @@ impl Renderer {
                 &diffuse_texture.layout(),
                 &camera_uniform.layout(),
                 &lights_storage.layout(),
-                &num_lights_uniform.layout(),
             ],
             &[Vertex::desc(), InstanceRaw::desc()],
             Some(texture::DepthTexture::DEPTH_FORMAT),
@@ -74,10 +63,7 @@ impl Renderer {
 
         let light_render_pipeline = context.create_render_pipeline(
             include_str!("light.wgsl").into(),
-            &[
-                &camera_uniform.layout(),
-                &lights_storage.layout(),
-            ],
+            &[&camera_uniform.layout(), &lights_storage.layout()],
             &[Vertex::desc()],
             Some(texture::DepthTexture::DEPTH_FORMAT),
         );
@@ -105,8 +91,8 @@ impl Renderer {
         let input_handler = InputHandler::new();
 
         Self {
-            input_handler,
             context,
+            input_handler,
             render_pipeline,
             depth_texture,
             quad,
@@ -118,7 +104,6 @@ impl Renderer {
             instances_to_draw: instances.len(),
             instances,
             lights_uniform,
-            num_lights_uniform,
             lights_storage,
             lights,
             light_render_pipeline,
@@ -219,15 +204,12 @@ impl Renderer {
         self.instance_buffer.update(&self.context, instances);
         self.camera_uniform.update(&self.context, &self.camera);
         self.lights_storage.update(&self.context, &self.lights);
-        self.num_lights_uniform
-            .update(&self.context, self.lights.len() as u32);
 
         // Draw everything
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.diffuse_texture.bind_group(), &[]);
         render_pass.set_bind_group(1, &self.camera_uniform.bind_group(), &[]);
         render_pass.set_bind_group(2, &self.lights_storage.bind_group(), &[]);
-        render_pass.set_bind_group(3, &self.num_lights_uniform.bind_group(), &[]);
 
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         render_pass.draw_quad_indexed(&self.quad, 0..self.instances.len() as _);
@@ -382,57 +364,6 @@ impl Context {
     #[inline]
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
-    }
-}
-
-pub struct Instance {
-    position: cgmath::Vector3<f32>,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct InstanceRaw {
-    model: [[f32; 4]; 4],
-}
-
-impl From<&Instance> for InstanceRaw {
-    fn from(instance: &Instance) -> Self {
-        Self {
-            model: cgmath::Matrix4::from_translation(instance.position).into(),
-        }
-    }
-}
-
-impl InstanceRaw {
-    pub fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-        use std::mem;
-
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 5,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
-                    shader_location: 6,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
-                    shader_location: 7,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
-                    shader_location: 8,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
-        }
     }
 }
 
