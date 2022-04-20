@@ -1,8 +1,9 @@
 use std::marker::PhantomData;
+use std::ops::RangeBounds;
 
 use bytemuck::{NoUninit, Pod};
 use wgpu::{util::DeviceExt, Device};
-use wgpu::{BindGroup, BindGroupLayout, BufferUsages};
+use wgpu::{BindGroup, BindGroupLayout, BufferAddress, BufferUsages};
 
 use crate::renderer::{self, Context};
 const VERTEX: BufferUsages = wgpu::BufferUsages::VERTEX;
@@ -12,8 +13,7 @@ const STORAGE: BufferUsages = wgpu::BufferUsages::STORAGE;
 const COPY_DST: BufferUsages = wgpu::BufferUsages::COPY_DST;
 
 pub struct Uniform<C> {
-    uniform: Buffer,
-    content_marker: PhantomData<C>,
+    uniform: Buffer<C>,
 }
 
 impl<C: Pod> Uniform<C> {
@@ -24,13 +24,12 @@ impl<C: Pod> Uniform<C> {
 
         Self {
             uniform: Buffer::new(raw, bind_group, bind_group_layout),
-            content_marker: PhantomData,
         }
     }
 
     #[allow(unused)]
     #[inline]
-    pub fn raw(&self) -> &Buffer {
+    pub fn raw(&self) -> &Buffer<C> {
         &self.uniform
     }
 
@@ -55,8 +54,7 @@ impl<C: Pod> Uniform<C> {
 }
 
 pub struct Storage<C> {
-    storage: Buffer,
-    content_marker: PhantomData<C>,
+    storage: Buffer<C>,
 }
 
 impl<C: Pod> Storage<C> {
@@ -71,13 +69,12 @@ impl<C: Pod> Storage<C> {
 
         Self {
             storage: Buffer::new(raw, bind_group, bind_group_layout),
-            content_marker: PhantomData,
         }
     }
 
     #[allow(dead_code)]
     #[inline]
-    pub fn raw(&self) -> &Buffer {
+    pub fn raw(&self) -> &Buffer<C> {
         &self.storage
     }
 
@@ -103,14 +100,58 @@ impl<C: Pod> Storage<C> {
     }
 }
 
+pub struct InstanceBuffer<C> {
+    raw: wgpu::Buffer,
+    _content_marker: PhantomData<C>,
+}
+
+impl<C: Pod> InstanceBuffer<C> {
+    #[inline]
+    pub fn new<T>(context: &Context, content: &[T]) -> Self
+    where
+        for<'a> &'a T: Into<C>,
+    {
+        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+        let raw = instance(context.device(), content.as_ref());
+
+        Self {
+            raw,
+            _content_marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn update<T>(&self, context: &renderer::Context, content: &[T])
+    where
+        for<'a> &'a T: Into<C>,
+    {
+        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+        context
+            .queue()
+            .write_buffer(&self.raw, 0, bytemuck::cast_slice(&content));
+    }
+
+    #[inline]
+    pub fn slice<'a>(&'a self, bounds: impl RangeBounds<BufferAddress>) -> wgpu::BufferSlice<'a> {
+        self.raw.slice(bounds)
+    }
+
+    #[allow(dead_code)]
+    #[inline]
+    pub fn raw(&self) -> &wgpu::Buffer {
+        &self.raw
+    }
+}
+
 #[derive(Debug)]
-pub struct Buffer {
+pub struct Buffer<C> {
     raw: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     bind_group_layout: wgpu::BindGroupLayout,
+    _content_marker: PhantomData<C>,
 }
 
-impl Buffer {
+impl<C: Pod> Buffer<C> {
     #[inline]
     pub fn new(
         raw: wgpu::Buffer,
@@ -121,10 +162,11 @@ impl Buffer {
             raw,
             bind_group,
             bind_group_layout,
+            _content_marker: PhantomData,
         }
     }
 
-    #[allow(unused)]
+    #[allow(dead_code)]
     #[inline]
     pub fn raw(&self) -> &wgpu::Buffer {
         &self.raw
@@ -138,6 +180,18 @@ impl Buffer {
     #[inline]
     pub fn layout(&self) -> &wgpu::BindGroupLayout {
         &self.bind_group_layout
+    }
+
+    #[allow(dead_code)]
+    #[inline]
+    pub fn update<T>(&self, context: &renderer::Context, content: &[T])
+    where
+        for<'a> &'a T: Into<C>,
+    {
+        let content = content.iter().map(|l| l.into()).collect::<Vec<C>>();
+        context
+            .queue()
+            .write_buffer(&self.raw, 0, bytemuck::cast_slice(&content));
     }
 }
 
@@ -153,8 +207,8 @@ pub fn vertex(device: &wgpu::Device, contents: &[impl NoUninit]) -> wgpu::Buffer
     buffer(device, "Vertex Buffer", contents, VERTEX)
 }
 
-pub fn instances(device: &wgpu::Device, contents: &[impl NoUninit]) -> wgpu::Buffer {
-    buffer(device, "Instance Buffer", contents, VERTEX)
+pub fn instance(device: &wgpu::Device, contents: &[impl NoUninit]) -> wgpu::Buffer {
+    buffer(device, "Instance Buffer", contents, VERTEX | COPY_DST)
 }
 
 pub fn index(device: &wgpu::Device, contents: &[impl NoUninit]) -> wgpu::Buffer {

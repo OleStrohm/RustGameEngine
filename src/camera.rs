@@ -19,9 +19,6 @@ impl Camera {
         Camera::new(width as f32 / height as f32, fovy, 0.1, 100.0)
     }
 
-    // Camera { eye: Point3 [0.12040675, 1.9793274, 5.588784], target: Point3 [0.0, 0.0, 0.0], up: Vector3 [0.0, 1.0, 0.0], aspect:│
-    //68  │ 1.3333334, fovy: 0.7853982 rad, znear: 0.1, zfar: 100.0 } 
-
     pub fn new(aspect: f32, fovy: impl Into<Rad<f32>>, znear: f32, zfar: f32) -> Camera {
         Camera {
             eye: (0.0, 0.0, 1.0).into(),
@@ -36,7 +33,7 @@ impl Camera {
 
     pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let size = 6.0;
+        let size = 5.0;
         let proj = cgmath::ortho(-size * self.aspect, size * self.aspect, -size, size, 10.0, -10.0);
 
         return OPENGL_TO_WGPU_MATRIX * proj * view;

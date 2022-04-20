@@ -1,4 +1,4 @@
-use crate::buffers;
+use crate::buffers::InstanceBuffer;
 use crate::buffers::Storage;
 use crate::buffers::Uniform;
 use crate::camera::Camera;
@@ -30,7 +30,7 @@ pub struct Renderer {
     camera_controller: CameraController,
     camera_uniform: Uniform<CameraUniform>,
     instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
+    instance_buffer: InstanceBuffer<InstanceRaw>,
     instances_to_draw: usize,
     lights_uniform: Uniform<LightUniform>,
     num_lights_uniform: Uniform<u32>,
@@ -41,47 +41,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub async fn new(window: &Window) -> Self {
-        let size = window.inner_size();
-
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let surface = unsafe { instance.create_surface(window) };
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await
-            .unwrap();
-
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
-                    limits: wgpu::Limits::default(),
-                    label: None,
-                },
-                None,
-            )
-            .await
-            .unwrap();
-
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_preferred_format(&adapter).unwrap(),
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::Fifo,
-        };
-        surface.configure(&device, &config);
-
-        let context = Context {
-            surface,
-            device,
-            queue,
-            config,
-            size,
-        };
+        let context = Context::new(window).await;
 
         let device = &context.device;
         let config = &context.config;
@@ -105,8 +65,8 @@ impl Renderer {
             &[
                 &diffuse_texture.layout(),
                 &camera_uniform.layout(),
-                &num_lights_uniform.layout(),
                 &lights_storage.layout(),
+                &num_lights_uniform.layout(),
             ],
             &[Vertex::desc(), InstanceRaw::desc()],
             Some(texture::DepthTexture::DEPTH_FORMAT),
@@ -116,7 +76,7 @@ impl Renderer {
             include_str!("light.wgsl").into(),
             &[
                 &camera_uniform.layout(),
-                &lights_uniform.layout(),
+                &lights_storage.layout(),
             ],
             &[Vertex::desc()],
             Some(texture::DepthTexture::DEPTH_FORMAT),
@@ -130,25 +90,17 @@ impl Renderer {
 
         let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|y| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| Instance {
+                    position: cgmath::Vector3 {
                         x: x as f32,
                         y: y as f32,
                         z: 0.0,
-                    } - INSTANCE_DISPLACEMENT;
-
-                    let rotation = cgmath::Quaternion::from_axis_angle(
-                        cgmath::Vector3::unit_z(),
-                        cgmath::Deg(0.0),
-                    );
-
-                    Instance { position, rotation }
+                    } - INSTANCE_DISPLACEMENT,
                 })
             })
             .collect::<Vec<_>>();
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = buffers::instances(&device, &instance_data);
+        let instance_buffer = InstanceBuffer::new(&context, &instances);
 
         let input_handler = InputHandler::new();
 
@@ -187,16 +139,27 @@ impl Renderer {
         }
     }
 
-    pub fn input(&mut self) -> &mut InputHandler {
-        &mut self.input_handler
-    }
-
     pub fn update(&mut self) {
         if self.input().clicked(Key::Up) {
             self.instances_to_draw = (self.instances_to_draw + 1).clamp(0, self.instances.len());
         }
         if self.input().clicked(Key::Down) {
             self.instances_to_draw = self.instances_to_draw.saturating_sub(1);
+        }
+        if self.input().clicked(Key::Space) {
+            self.instances = (0..NUM_INSTANCES_PER_ROW)
+                .flat_map(|y| {
+                    (0..NUM_INSTANCES_PER_ROW).map(move |x| Instance {
+                        position: cgmath::Vector3 {
+                            x: x as f32,
+                            y: y as f32,
+                            z: 0.0,
+                        } - INSTANCE_DISPLACEMENT,
+                    })
+                })
+                .filter(|_| rand::random())
+                .collect::<Vec<_>>();
+            self.instances_to_draw = self.instances_to_draw.clamp(0, self.instances.len() - 1);
         }
 
         self.camera_controller
@@ -252,26 +215,31 @@ impl Renderer {
             }),
         });
 
+        let instances = &self.instances[..self.instances_to_draw];
+        self.instance_buffer.update(&self.context, instances);
         self.camera_uniform.update(&self.context, &self.camera);
         self.lights_storage.update(&self.context, &self.lights);
-        self.num_lights_uniform.update(&self.context, self.lights.len() as u32);
+        self.num_lights_uniform
+            .update(&self.context, self.lights.len() as u32);
 
         // Debug draw lights
-        // render_pass.set_pipeline(&self.light_render_pipeline);
-        // render_pass.set_bind_group(0, &self.camera_uniform.bind_group(), &[]);
-        // render_pass.set_bind_group(1, &self.lights_uniform.bind_group(), &[]);
-        // self.lights_uniform.update(&self.context, &self.lights[0]);
-        // render_pass.draw_quad(&self.quad);
+        self.lights_uniform.update(&self.context, &self.lights[1]);
+        render_pass.set_pipeline(&self.light_render_pipeline);
+        render_pass.set_bind_group(0, &self.camera_uniform.bind_group(), &[]);
+        render_pass.set_bind_group(1, &self.lights_storage.bind_group(), &[]);
+        render_pass.draw_quad_indexed(&self.quad, 0..self.lights.len() as _);
 
         // Draw everything
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.diffuse_texture.bind_group(), &[]);
         render_pass.set_bind_group(1, &self.camera_uniform.bind_group(), &[]);
-        render_pass.set_bind_group(2, &self.num_lights_uniform.bind_group(), &[]);
-        render_pass.set_bind_group(3, &self.lights_storage.bind_group(), &[]);
+        render_pass.set_bind_group(2, &self.lights_storage.bind_group(), &[]);
+        render_pass.set_bind_group(3, &self.num_lights_uniform.bind_group(), &[]);
 
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        render_pass.draw_quad_indexed(&self.quad, 0..self.instances_to_draw as _);
+        for i in 0..instances.len() as _ {
+            render_pass.draw_quad_indexed(&self.quad, i..i + 1);
+        }
 
         drop(render_pass);
 
@@ -284,6 +252,10 @@ impl Renderer {
     pub fn get_size(&self) -> PhysicalSize<u32> {
         self.context.size
     }
+
+    pub fn input(&mut self) -> &mut InputHandler {
+        &mut self.input_handler
+    }
 }
 
 pub struct Context {
@@ -295,6 +267,50 @@ pub struct Context {
 }
 
 impl Context {
+    pub async fn new(window: &Window) -> Self {
+        let size = window.inner_size();
+
+        let instance = wgpu::Instance::new(wgpu::Backends::all());
+        let surface = unsafe { instance.create_surface(window) };
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .unwrap();
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::empty(),
+                    limits: wgpu::Limits::default(),
+                    label: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface.get_preferred_format(&adapter).unwrap(),
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::Fifo,
+        };
+        surface.configure(&device, &config);
+
+        Self {
+            surface,
+            device,
+            queue,
+            config,
+            size,
+        }
+    }
+
     pub fn create_render_pipeline<'a>(
         &self,
         shader: Cow<'a, str>,
@@ -373,7 +389,6 @@ impl Context {
 
 pub struct Instance {
     position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
 }
 
 #[repr(C)]
@@ -382,12 +397,10 @@ pub struct InstanceRaw {
     model: [[f32; 4]; 4],
 }
 
-impl Instance {
-    pub fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position)
-                * cgmath::Matrix4::from(self.rotation))
-            .into(),
+impl From<&Instance> for InstanceRaw {
+    fn from(instance: &Instance) -> Self {
+        Self {
+            model: cgmath::Matrix4::from_translation(instance.position).into(),
         }
     }
 }

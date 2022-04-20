@@ -14,12 +14,12 @@ struct Light {
 struct Lights {
     data: array<Light>;
 };
-[[group(3), binding(0)]]
+[[group(2), binding(0)]]
 var<storage, read> lights: Lights;
 struct LightCount {
     data: u32;
 };
-[[group(2), binding(0)]]
+[[group(3), binding(0)]]
 var<uniform> num_lights: LightCount;
 
 struct CameraUniform {

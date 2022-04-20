@@ -16,3 +16,4 @@ pollster = "0.2.5"
 bytemuck = { version = "1.9.1", features = [ "derive" ] }
 anyhow = "1.0.56"
 either = "1.6.1"
+rand = "0.8.5"
